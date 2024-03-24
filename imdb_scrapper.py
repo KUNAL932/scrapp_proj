@@ -1,6 +1,13 @@
 from bs4 import BeautifulSoup
 import requests
 import re
+import json
+import hmac
+import hashlib
+import base64
+import urllib.parse
+
+
 
 url = "https://www.imdb.com/"
 headers = {
@@ -22,9 +29,64 @@ genre_url = "https://www.imdb.com/search/title/?genres={}"
 
 base = "https://www.imdb.com"
 
+def base64_encoded(data):
+    # json_str = json.dumps(data)
+    # print("next data",json_str)
+    # Encode the JSON string to base64
+    # base64_encoded_data = base64.b64encode(json_str.encode()).decode()
+    # encoded_data = base64.b64encode(json.dumps(data).encode()).decode()
+    # json_str = json.dumps(data)
 
-def fetch_imdb(url):
-    url = "https://www.imdb.com/search/title/?genres=comedy"
+    # # Encode the JSON string to base64
+    # encoded_data = base64.b64encode(json_str.encode()).decode()
+    json_str = json.dumps(data)
+
+    # Encode the JSON string to base64
+    encoded_data = base64.b64encode(json_str.encode()).decode()
+
+    # Format the encoded data
+    formatted_data = encoded_data.replace('+', '-').replace('/', '_').rstrip('=')
+
+    print(formatted_data)
+    print(encoded_data)
+
+    return encoded_data
+
+
+def encode(json_data):
+    
+
+    # JSON data to be hashed
+   
+    # Convert the data to a JSON string
+    # json_data = json.dumps(data, sort_keys=True)
+
+    # Key for HMAC
+    key = b'65dd1bac6fea9c75c87e2c0435402c1296b5cc5dd908eb897269aaa31fff44b1'
+
+    # Calculate HMAC-SHA256 hash
+    hmac_hash = hmac.new(key, json_data.encode(), hashlib.sha256).hexdigest()
+
+    print("HMAC-SHA256 Hash:", hmac_hash)
+
+def hit_requests(url,payload):
+    encoded_payload = urllib.parse.urlencode({"query": payload})
+
+    # Create the final URL
+    url = f"{url}?{encoded_payload}"
+    print("===================================\n")
+    print(url)
+
+    session = requests.Session()
+    response = session.get(url)
+    if not response or not response.content:
+        return
+    return response.content
+    
+def fetch_imdb(url, genre):
+    next_navigation = ""
+    # url = "https://www.imdb.com/search/title/?genres=horror"
+    navigation_url = "https://caching.graphql.imdb.com/"
     session = requests.Session()
     response = session.get(url, headers=headers)
     if not response or not response.content:
@@ -34,32 +96,88 @@ def fetch_imdb(url):
     # print(soup_home.get()) 
     elements = soup_home.find(class_="ipc-metadata-list ipc-metadata-list--dividers-between sc-748571c8-0 jmWPOZ detailed-list-view ipc-metadata-list--base")
     final_list = []
+    # next_data_navigation = soup_home.find('script', id='__NEXT_DATA__')
+    # if next_data_navigation:
+    #     next_navigation = next_data_navigation.get_text()
+    start = 50
+    search_string = 'ref_=sr_i_{}'.format(start)
+
+    # Find the <a> tag based on the dynamically generated search string
+    target_a_tag = soup_home.find('a', href=lambda href: href and search_string in href)
+
+    # Get the 'href' attribute value
+    if target_a_tag:
+        href_value = target_a_tag.get('href')
+        print("761",href_value)
+        searched_text = re.search(r"[a-z]{2}[\d]{7}",href_value,re.I)
+        if searched_text:
+            sea_val = searched_text.group()
+            print(sea_val)
+    print("genre - ",genre)
+    next_data = {
+        # "esToken":["575","575",str(href_value)],
+        "esToken":["168","168","tt3783958"],
+    
+        "filter":{"constraints":{"genreConstraint":{
+            "allGenreIds":[genre],"excludeGenreIds":[]}},
+            "language":"en-US","sort":{"sortBy":"POPULARITY","sortOrder":"ASC"},"resultIndex": start-1}}
+   
+    base64_encoded_data = base64_encoded(next_data)
+    print("==\n",base64_encoded_data,"==\n")
+    # operationName: "AdvancedTitleSearch"
+    payload = {
+    "operationName": "AdvancedTitleSearch",
+    "variables": {
+        "after": base64_encoded_data,
+        "first": 50,
+        "genreConstraint": {
+            "allGenreIds": [genre],
+            "excludeGenreIds": []
+        },
+        "locale": "en-US",
+        "sortBy": "POPULARITY",
+        "sortOrder": "ASC"
+    },
+        "extensions": {
+            "persistedQuery": {
+                "sha256Hash": "65dd1bac6fea9c75c87e2c0435402c1296b5cc5dd908eb897269aaa31fff44b1",
+                "version": 1
+            }
+        }
+        }
+    # tried to fetch the navigation, every thin
+    # new_response = hit_requests(navigation_url,payload)
     for element in elements:
         movie_dict = {}
-        title = element.find(class_="ipc-title__text").get_text(strip=True)
-        release_year = element.find(class_="sc-b0691f29-8 ilsLEX dli-title-metadata-item").get_text(strip=True)
-        imdb_rating_text = element.find(class_='ipc-rating-star--imdb').text.strip()
-        imdb_rating = re.split(r"\s",imdb_rating_text)
-        imdb_rating = imdb_rating[0]
-        # director = element.find(class_="ipc-title ipc-title--base ipc-title--title ipc-title-link-no-icon ipc-title--on-textPrimary sc-b0691f29-9 klOwFB dli-title").get_text(strip=True)
-        # casts = element.find(class_="ipc-title ipc-title--base ipc-title--title ipc-title-link-no-icon ipc-title--on-textPrimary sc-b0691f29-9 klOwFB dli-title").get_text(strip=True)
+        title = ""
+        release_year = ""
+        imdb_rating= ""
+        imdb_rating_text = element.find(class_='ipc-rating-star--imdb')
+        release_year_text = element.find(class_="sc-b0691f29-8 ilsLEX dli-title-metadata-item")
+        if release_year_text:
+            release_year = release_year_text.get_text(strip=True)
+        if imdb_rating_text:
+            imdb_rating = imdb_rating_text.text.strip()
+            imdb_rating = re.split(r"\s",imdb_rating)
+            imdb_rating = imdb_rating[0]
         plot_summary = element.find(class_="ipc-html-content-inner-div").get_text(strip=True)
         data = element.find(class_="ipc-lockup-overlay ipc-focusable")
         href = data['href']
-        # print(href)
         more_details_api = base + href
         final_response = session.get(more_details_api, headers=headers)
         if not final_response or not final_response.content:
             return
         soup_genre_page = BeautifulSoup(final_response.text,'html.parser')
         # print(soup_genre_page)
+        title_ele = soup_genre_page.find(class_="hero__primary-text")
+        if title_ele:
+            title = title_ele.get_text(strip=True)
+        # print(title)
         director = soup_genre_page.find(class_="ipc-metadata-list-item__list-content-item ipc-metadata-list-item__list-content-item--link").get_text(strip=True)
-        print(director)
+        # print(director)
         ul_element = soup_genre_page.find_all("ul",class_="ipc-inline-list ipc-inline-list--show-dividers ipc-inline-list--inline ipc-metadata-list-item__list-content baseAlt")
-
         # Initialize a list to store the texts
-        texts = []
-
+        casts = []
         # Extract text from each <a> element within <li> elements
         for ul in ul_element:
             for li_element in ul.find_all('li'):
@@ -67,20 +185,27 @@ def fetch_imdb(url):
                     continue
                 a_element = li_element.find('a')
                 if a_element:
-                    texts.append(a_element.text.strip())
+                    casts.append(a_element.text.strip())
         movie_dict = {
-            "titile": title,
+            "title": title,
             "release_year": release_year,
             "imdb_rating": imdb_rating,
             "plot_summary": plot_summary,
             "director": director,
-            "casts": texts
+            "casts": casts
         }
-        break
+        final_list.append(movie_dict)
+    print(final_list)
+    with open("sample.json", "w") as outfile: 
+        json.dump(final_list, outfile)
         
 
 
-genre = "comedy"
+        
+
+
+genre = "Comedy"
 genre_url = genre_url.format(genre)
-fetch_imdb(genre_url)
+fetch_imdb(genre_url, genre)
+
 
